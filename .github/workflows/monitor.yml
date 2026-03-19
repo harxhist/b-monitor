@@ -1,0 +1,41 @@
+name: Bounty Monitor
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch: 
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Restore seen issues cache
+        uses: actions/cache@v4
+        with:
+          path: .seen-issues.json
+          key: seen-issues-${{ github.run_id }}
+          restore-keys: seen-issues-
+
+      - name: Run monitor
+        env:
+          GITHUB_TOKEN: ${{ secrets.TOKEN }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+        run: node monitor.js
+
+      - name: Save seen issues cache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: .seen-issues.json
+          key: seen-issues-${{ github.run_id }}
