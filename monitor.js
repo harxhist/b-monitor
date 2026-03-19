@@ -14,7 +14,7 @@ const CONFIG = {
       user: "resend",
       pass: process.env.SMTP_PASS || "",
     },
-    from: process.env.EMAIL_FROM || '"Bounty Monitor 🎯" <mail.har.sh10.in>',
+    from: process.env.EMAIL_FROM || '"Bounty Monitor" <monitor@mail.har.sh10.in>',
   },
 
   github: {
@@ -89,6 +89,7 @@ function saveSeen(seen) {
 
 async function sendEmail(newIssues) {
   const nodemailer = require("nodemailer");
+  const fromAddress = normalizeFromAddress(CONFIG.email.from, CONFIG.email.to);
 
   const transporter = nodemailer.createTransport({
     host: CONFIG.email.host,
@@ -156,13 +157,35 @@ async function sendEmail(newIssues) {
   </div>`;
 
   await transporter.sendMail({
-    from: CONFIG.email.from,
+    from: fromAddress,
     to: CONFIG.email.to,
     subject: `🎯 ${newIssues.length} new bounty issue${newIssues.length > 1 ? "s" : ""} — Go/TS/Java/JS`,
     html,
   });
 
   console.log(`✅ Email sent with ${newIssues.length} new issues`);
+}
+
+function isValidEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((value || "").trim());
+}
+
+function normalizeFromAddress(from, fallbackTo) {
+  const raw = (from || "").trim();
+  const angledMatch = raw.match(/^\s*(?:"?([^"]+)"?\s*)?<([^>]+)>\s*$/);
+
+  if (angledMatch) {
+    const name = (angledMatch[1] || "Bounty Monitor").trim();
+    const email = angledMatch[2].trim();
+    if (isValidEmail(email)) return `"${name}" <${email}>`;
+  } else if (isValidEmail(raw)) {
+    return raw;
+  }
+
+  if (isValidEmail(fallbackTo)) return `"Bounty Monitor" <${fallbackTo}>`;
+  throw new Error(
+    "Invalid EMAIL_FROM format. Use `email@example.com` or `Name <email@example.com>`."
+  );
 }
 
 function escapeHtml(str) {
