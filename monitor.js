@@ -3,15 +3,10 @@
 const fs = require("fs");
 const path = require("path");
 require("dotenv").config();
-
-// ─── CONFIG
-// ──────────────────────────────────────────────────────────────────
-
 const CONFIG = {
   email: {
     to: process.env.EMAIL_TO || "harxh@duck.com",
 
-    //Resend (free tier, recommended)
     host: "smtp.resend.com",
     port: 587,
     secure: false,
@@ -23,7 +18,7 @@ const CONFIG = {
   },
 
   github: {
-    token: process.env.GITHUB_TOKEN || "",
+    token: process.env.TOKEN || "",
   },
 
   stateFile: path.join(__dirname, ".seen-issues.json"),
