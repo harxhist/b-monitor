@@ -18,7 +18,7 @@ const CONFIG = {
   },
 
   github: {
-    token: process.env.TOKEN || "",
+    token: process.env.GITHUB_TOKEN || process.env.TOKEN || "",
   },
 
   stateFile: path.join(__dirname, ".seen-issues.json"),
