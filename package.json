@@ -1,0 +1,18 @@
+{
+  "name": "bounty-monitor",
+  "version": "1.0.0",
+  "description": "Monitors GitHub for new unassigned bounty issues and emails alerts",
+  "main": "monitor.js",
+  "scripts": {
+    "start": "node monitor.js",
+    "test": "GITHUB_TOKEN=${GITHUB_TOKEN} node monitor.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "node-fetch": "^3.3.2",
+    "nodemailer": "^6.9.9"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
