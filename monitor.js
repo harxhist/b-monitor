@@ -32,8 +32,52 @@ const BOUNTY_ISSUE_QUERY_PREFIX =
 
 /** Rolling window: only issues with `created_at` within this many ms are kept (search is then filtered in JS). */
 const BOUNTY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const REQUEST_DELAY_MS = 2500;
+const MAX_RETRIES = 3;
 
 // ─── GITHUB SEARCH ───────────────────────────────────────────────────────────
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function parseGithubErrorText(text) {
+  try {
+    const errJson = JSON.parse(text);
+    if (errJson && errJson.message) return errJson.message;
+  } catch {
+    /* ignore */
+  }
+  return text ? text.slice(0, 200) : "";
+}
+
+async function fetchWithRetry(fetch, url, headers, lang) {
+  let attempt = 0;
+
+  while (attempt <= MAX_RETRIES) {
+    const res = await fetch(url, { headers });
+    if (res.ok) return res;
+
+    const text = await res.text();
+    const message = parseGithubErrorText(text);
+    const isSecondaryLimit = res.status === 403 && /secondary rate limit/i.test(message);
+
+    if (!isSecondaryLimit || attempt === MAX_RETRIES) {
+      console.error(`GitHub API error for ${lang}: ${res.status} ${res.statusText}${message ? ` — ${message}` : ""}`);
+      return null;
+    }
+
+    const retryAfterSeconds = Number(res.headers.get("retry-after")) || 0;
+    const backoffMs = retryAfterSeconds > 0 ? retryAfterSeconds * 1000 : 15000 * (attempt + 1);
+    console.warn(
+      `GitHub secondary rate limit for ${lang}. Retry ${attempt + 1}/${MAX_RETRIES} in ${Math.round(
+        backoffMs / 1000
+      )}s...`
+    );
+    await sleep(backoffMs);
+    attempt += 1;
+  }
+
+  return null;
+}
 
 async function fetchIssues() {
   const fetch = (await import("node-fetch")).default;
@@ -56,17 +100,8 @@ async function fetchIssues() {
     }
 
     try {
-      const res = await fetch(url, { headers });
-      if (!res.ok) {
-        const text = await res.text();
-        let detail = "";
-        try {
-          const errJson = JSON.parse(text);
-          if (errJson.message) detail = ` — ${errJson.message}`;
-        } catch {
-          if (text) detail = ` — ${text.slice(0, 200)}`;
-        }
-        console.error(`GitHub API error for ${lang}: ${res.status} ${res.statusText}${detail}`);
+      const res = await fetchWithRetry(fetch, url, headers, lang);
+      if (!res) {
         continue;
       }
       const data = await res.json();
@@ -85,7 +120,7 @@ async function fetchIssues() {
         .filter((i) => new Date(i.created_at).getTime() > minCreatedMs);
       allIssues.push(...issues);
 
-      await new Promise((r) => setTimeout(r, 1200));
+      await sleep(REQUEST_DELAY_MS);
     } catch (err) {
       console.error(`Fetch error for ${lang}:`, err.message);
     }
