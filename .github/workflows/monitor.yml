@@ -3,7 +3,12 @@ name: Bounty Monitor
 on:
   schedule:
     - cron: "*/30 * * * *"
-  workflow_dispatch: 
+  workflow_dispatch:
+    inputs:
+      reset_seen:
+        description: "Ignore saved seen-issues state for this run (flush cache state)."
+        required: false
+        default: "false"
 
 jobs:
   monitor:
@@ -31,6 +36,7 @@ jobs:
         env:
           # Prefer a PAT in repo secret TOKEN for higher Search API quotas; otherwise the built-in token (not secrets.GITHUB_TOKEN).
           GITHUB_TOKEN: ${{ secrets.TOKEN || github.token }}
+          RESET_SEEN: ${{ inputs.reset_seen }}
           SMTP_PASS: ${{ secrets.SMTP_PASS || secrets.RESEND_API_KEY }}
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}

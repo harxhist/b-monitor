@@ -49,6 +49,10 @@ function parseGithubErrorText(text) {
   return text ? text.slice(0, 200) : "";
 }
 
+function toGithubDateUtc(ms) {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
 async function fetchWithRetry(fetch, url, headers, lang) {
   let attempt = 0;
 
@@ -62,7 +66,7 @@ async function fetchWithRetry(fetch, url, headers, lang) {
 
     if (!isSecondaryLimit || attempt === MAX_RETRIES) {
       console.error(`GitHub API error for ${lang}: ${res.status} ${res.statusText}${message ? ` — ${message}` : ""}`);
-      return null;
+      return { res: null, hitSecondaryLimit: isSecondaryLimit };
     }
 
     const retryAfterSeconds = Number(res.headers.get("retry-after")) || 0;
@@ -76,19 +80,20 @@ async function fetchWithRetry(fetch, url, headers, lang) {
     attempt += 1;
   }
 
-  return null;
+  return { res: null, hitSecondaryLimit: false };
 }
 
 async function fetchIssues() {
   const fetch = (await import("node-fetch")).default;
   const allIssues = [];
   const minCreatedMs = Date.now() - BOUNTY_MAX_AGE_MS;
+  const minCreatedDate = toGithubDateUtc(minCreatedMs);
 
   for (const lang of CONFIG.languages) {
     const query = encodeURIComponent(
-      `${BOUNTY_ISSUE_QUERY_PREFIX} language:${lang}`
+      `${BOUNTY_ISSUE_QUERY_PREFIX} created:>=${minCreatedDate} language:${lang}`
     );
-    const url = `https://api.github.com/search/issues?q=${query}&sort=created&order=desc&per_page=100`;
+    const url = `https://api.github.com/search/issues?q=${query}&sort=created&order=desc&per_page=30`;
 
     const headers = {
       Accept: "application/vnd.github+json",
@@ -100,8 +105,12 @@ async function fetchIssues() {
     }
 
     try {
-      const res = await fetchWithRetry(fetch, url, headers, lang);
+      const { res, hitSecondaryLimit } = await fetchWithRetry(fetch, url, headers, lang);
       if (!res) {
+        if (hitSecondaryLimit) {
+          console.warn("Stopping remaining language searches for this run due to secondary rate limit.");
+          break;
+        }
         continue;
       }
       const data = await res.json();
@@ -269,7 +278,14 @@ async function main() {
     throw new Error("Missing SMTP_PASS. Add it to your .env or GitHub Actions secrets.");
   }
 
-  const seen = loadSeen();
+  const resetSeen = ["1", "true", "yes"].includes(
+    String(process.env.RESET_SEEN || "").toLowerCase()
+  );
+  if (resetSeen) {
+    console.log("Resetting seen issues state for this run.");
+  }
+
+  const seen = resetSeen ? new Set() : loadSeen();
   const issues = await fetchIssues();
 
   const newIssues = issues.filter((i) => !seen.has(i.id));
