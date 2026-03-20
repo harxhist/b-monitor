@@ -26,44 +26,63 @@ const CONFIG = {
   labels: ["💎 Bounty", "bounty", "Bounty"],
 };
 
+/** Open unassigned bounty issues with no PR linked via closing keywords; `language:` added per fetch. */
+const BOUNTY_ISSUE_QUERY_PREFIX =
+  'is:issue is:open no:assignee -linked:pr label:"💎 Bounty"';
+
+/** Rolling window: only issues with `created_at` within this many ms are kept (search is then filtered in JS). */
+const BOUNTY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
 // ─── GITHUB SEARCH ───────────────────────────────────────────────────────────
 
 async function fetchIssues() {
   const fetch = (await import("node-fetch")).default;
   const allIssues = [];
+  const minCreatedMs = Date.now() - BOUNTY_MAX_AGE_MS;
 
   for (const lang of CONFIG.languages) {
     const query = encodeURIComponent(
-      `is:issue is:open no:assignee label:"💎 Bounty" language:${lang}`
+      `${BOUNTY_ISSUE_QUERY_PREFIX} language:${lang}`
     );
-    const url = `https://api.github.com/search/issues?q=${query}&sort=created&order=desc&per_page=30`;
+    const url = `https://api.github.com/search/issues?q=${query}&sort=created&order=desc&per_page=100`;
 
     const headers = {
       Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
       "User-Agent": "bounty-monitor/1.0",
     };
     if (CONFIG.github.token) {
-      headers["Authorization"] = `Bearer ${CONFIG.github.token}`;
+      headers.Authorization = `Bearer ${CONFIG.github.token}`;
     }
 
     try {
       const res = await fetch(url, { headers });
       if (!res.ok) {
-        console.error(`GitHub API error for ${lang}: ${res.status} ${res.statusText}`);
+        const text = await res.text();
+        let detail = "";
+        try {
+          const errJson = JSON.parse(text);
+          if (errJson.message) detail = ` — ${errJson.message}`;
+        } catch {
+          if (text) detail = ` — ${text.slice(0, 200)}`;
+        }
+        console.error(`GitHub API error for ${lang}: ${res.status} ${res.statusText}${detail}`);
         continue;
       }
       const data = await res.json();
-      const issues = (data.items || []).map((i) => ({
-        id: i.id,
-        number: i.number,
-        title: i.title,
-        url: i.html_url,
-        repo: i.repository_url.replace("https://api.github.com/repos/", ""),
-        language: lang,
-        labels: i.labels.map((l) => l.name),
-        created_at: i.created_at,
-        body_snippet: (i.body || "").slice(0, 300).replace(/\n+/g, " "),
-      }));
+      const issues = (data.items || [])
+        .map((i) => ({
+          id: i.id,
+          number: i.number,
+          title: i.title,
+          url: i.html_url,
+          repo: i.repository_url.replace("https://api.github.com/repos/", ""),
+          language: lang,
+          labels: i.labels.map((l) => l.name),
+          created_at: i.created_at,
+          body_snippet: (i.body || "").slice(0, 300).replace(/\n+/g, " "),
+        }))
+        .filter((i) => new Date(i.created_at).getTime() > minCreatedMs);
       allIssues.push(...issues);
 
       await new Promise((r) => setTimeout(r, 1200));
@@ -142,15 +161,17 @@ async function sendEmail(newIssues) {
   <div style="font-family:sans-serif;max-width:700px;margin:auto;">
     <div style="background:#0969da;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0;">
       <h2 style="margin:0;">🎯 ${newIssues.length} New Bounty Issue${newIssues.length > 1 ? "s" : ""} Found</h2>
-      <p style="margin:4px 0 0;opacity:0.85;">Unassigned · No PR · Go / TypeScript / Java / JavaScript</p>
+      <p style="margin:4px 0 0;opacity:0.85;">Opened in the last 24h · Unassigned · No linked PR · Go / TS / Java / JS</p>
     </div>
     <div style="background:#fff;padding:24px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;">
       ${htmlSections}
       <hr style="border:none;border-top:1px solid #eee;margin:24px 0"/>
       <p style="color:#999;font-size:12px;text-align:center;">
-        Monitored via GitHub Search API &nbsp;·&nbsp;
-        <a href="https://github.com/search?q=is:issue+is:open+no:assignee+label:%22%F0%9F%92%8E+Bounty%22&type=issues" style="color:#0969da;">
-          View all on GitHub
+        Only issues created in the last 24 hours are emailed (rolling window). &nbsp;·&nbsp;
+        <a href="https://github.com/search?q=${encodeURIComponent(
+          BOUNTY_ISSUE_QUERY_PREFIX
+        )}&type=issues" style="color:#0969da;">
+          Similar search on GitHub
         </a>
       </p>
     </div>
@@ -159,7 +180,7 @@ async function sendEmail(newIssues) {
   await transporter.sendMail({
     from: fromAddress,
     to: CONFIG.email.to,
-    subject: `🎯 ${newIssues.length} new bounty issue${newIssues.length > 1 ? "s" : ""} — Go/TS/Java/JS`,
+    subject: `🎯 ${newIssues.length} new bounty issue${newIssues.length > 1 ? "s" : ""} (24h) — Go/TS/Java/JS`,
     html,
   });
 
@@ -204,6 +225,11 @@ function langEmoji(lang) {
 
 async function main() {
   console.log(`[${new Date().toISOString()}] Checking GitHub for new bounty issues...`);
+  if (!CONFIG.github.token) {
+    console.warn(
+      "No GITHUB_TOKEN/TOKEN — unauthenticated Search API is heavily limited (403). Set TOKEN locally or rely on Actions passing github.token."
+    );
+  }
   if (!CONFIG.email.auth.pass) {
     throw new Error("Missing SMTP_PASS. Add it to your .env or GitHub Actions secrets.");
   }

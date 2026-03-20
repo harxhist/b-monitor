@@ -8,6 +8,8 @@ on:
 jobs:
   monitor:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -27,7 +29,8 @@ jobs:
 
       - name: Run monitor
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN || secrets.TOKEN }}
+          # Prefer a PAT in repo secret TOKEN for higher Search API quotas; otherwise the built-in token (not secrets.GITHUB_TOKEN).
+          GITHUB_TOKEN: ${{ secrets.TOKEN || github.token }}
           SMTP_PASS: ${{ secrets.SMTP_PASS || secrets.RESEND_API_KEY }}
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
