@@ -108,8 +108,10 @@ async function fetchIssues() {
       const { res, hitSecondaryLimit } = await fetchWithRetry(fetch, url, headers, lang);
       if (!res) {
         if (hitSecondaryLimit) {
-          console.warn("Stopping remaining language searches for this run due to secondary rate limit.");
-          break;
+          console.warn(
+            "Secondary rate limit hit for this query; continuing remaining languages after a short wait."
+          );
+          await sleep(20000);
         }
         continue;
       }
